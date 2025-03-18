@@ -1,169 +1,250 @@
 <?php
+// Start session to store OTP
 session_start();
-include 'db_connect.php';
 
-$message = ""; // Initialize message
-$debug = false; // Set to true to see debugging info
+// Import PHPMailer classes
+require 'vendor/autoload.php'; // Make sure PHPMailer is installed via Composer
 
-// Debug function
-function debug_token($email, $token, $expiry, $conn) {
-    echo "<div style='background: #f5f5f5; border: 1px solid #ddd; padding: 10px; margin: 10px 0; color: #333;'>";
-    echo "<strong>DEBUG INFO (remove in production):</strong><br>";
-    echo "Email: " . htmlspecialchars($email) . "<br>";
-    echo "Token: " . htmlspecialchars($token) . "<br>";
-    echo "Expiry: " . htmlspecialchars($expiry) . "<br>";
-    
-    // Check if token is saved
-    $check = $conn->prepare("SELECT reset_token, reset_expires FROM admin WHERE email = ?");
-    $check->bind_param("s", $email);
-    $check->execute();
-    $result = $check->get_result();
-    
-    if ($row = $result->fetch_assoc()) {
-        echo "Token in DB: " . htmlspecialchars($row['reset_token']) . "<br>";
-        echo "Expiry in DB: " . htmlspecialchars($row['reset_expires']) . "<br>";
-    } else {
-        echo "No token found in database for this email.<br>";
-    }
-    
-    echo "</div>";
+use PHPMailer\PHPMailer\PHPMailer;
+use PHPMailer\PHPMailer\Exception;
+
+// Function to generate OTP
+function generateOTP($length = 6) {
+    return str_pad(random_int(100000, 999999), $length, '0', STR_PAD_LEFT);
 }
 
-if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    $email = trim($_POST['email']);
-    
-    // Validate email
-    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        $message = "Invalid email format";
-    } else {
-        // Check if email exists in the database
-        $stmt = $conn->prepare("SELECT id, username FROM admin WHERE email = ?");
+// Function to send OTP via email
+function sendOTPEmail($email, $otp) {
+    $mail = new PHPMailer(true);
+
+    try {
+        // Server settings
+        $mail->isSMTP();
+        $mail->Host       = 'smtp.gmail.com';
+        $mail->SMTPAuth   = true;
+        $mail->Username   = 'killernasus04@gmail.com'; // Your Gmail
+        $mail->Password   = 'hssy yghe dgdz gfcs';    // Your Gmail app password
+        $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
+        $mail->Port       = 587;
+
+        // Recipients
+        $mail->setFrom('killernasus04@gmail.com', 'Celestial Jewels');
+        $mail->addAddress($email);
+
+        // Email Content
+        $mail->isHTML(true);
+        $mail->Subject = 'Your OTP Code';
+        $mail->Body    = "Your OTP for verification is: <b>$otp</b><br>This OTP expires in 10 minutes.";
+        $mail->AltBody = "Your OTP for verification is: $otp\nThis OTP expires in 10 minutes.";
         
-        if ($stmt) {
-            $stmt->bind_param("s", $email);
-            $stmt->execute();
-            $stmt->store_result();
-            
-            if ($stmt->num_rows > 0) {
-                // Generate token
-                $token = bin2hex(random_bytes(16)); // Shorter token, less chance of corruption
-                $expiry = date('Y-m-d H:i:s', strtotime('+24 hours')); // Longer expiry time
-                
-                // Store token in database - make sure these columns exist
-                $update = $conn->prepare("UPDATE admin SET reset_token = ?, reset_expires = ? WHERE email = ?");
-                if (!$update) {
-                    $message = "Database error: " . $conn->error;
-                } else {
-                    $update->bind_param("sss", $token, $expiry, $email);
-                    $result = $update->execute();
-                    
-                    if ($result) {
-                        // Create reset link
-                        $resetLink = "http://" . $_SERVER['HTTP_HOST'] . dirname($_SERVER['PHP_SELF']) . "/reset_password.php?token=" . urlencode($token);
-                        
-                        // In a real application, you would send this link via email
-                        $message = "Password reset link has been generated. <br>Reset link: <a href='$resetLink'>$resetLink</a>";
-                        
-                        // Debug info
-                        if ($debug) {
-                            debug_token($email, $token, $expiry, $conn);
-                        }
-                    } else {
-                        $message = "Failed to update token: " . $update->error;
-                    }
-                    $update->close();
-                }
-            } else {
-                $message = "No account found with that email address";
-            }
-            $stmt->close();
-        } else {
-            $message = "Database error: " . $conn->error;
-        }
+        $mail->send();
+        return true;
+    } catch (Exception $e) {
+        return false;
+    }
+}
+
+// Process email input
+if ($_SERVER["REQUEST_METHOD"] == "POST" && !empty($_POST['email'])) {
+    $email = filter_var($_POST['email'], FILTER_SANITIZE_EMAIL);
+    $otp = generateOTP();
+    $_SESSION['otp'] = $otp;
+    $_SESSION['otp_time'] = time();
+    $_SESSION['email'] = $email;
+
+    if (sendOTPEmail($email, $otp)) {
+        $success_message = "OTP sent successfully to $email.";
+    } else {
+        $error_message = "Failed to send OTP. Please try again.";
     }
 }
 ?>
 
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CELESTIAL JEWELS - Forgot Password</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <title>Forgot Password | Celestial Jewels</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
         body {
-            background: linear-gradient(to right, #111, #333);
-            color: gold;
-            height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f0f2f5;
+            color: #333;
+            line-height: 1.6;
+            padding: 20px;
         }
-        .login-container {
-            width: 350px;
+        
+        .container {
+            max-width: 450px;
+            margin: 40px auto;
+            background-color: #ffffff;
             padding: 30px;
-            background: #c9a74a;
-            border-radius: 10px;
-            box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
-            text-align: center;
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
         }
-        .login-container h2 {
-            font-weight: bold;
+        
+        h2 {
+            color: #2c3e50;
+            text-align: center;
+            margin-bottom: 25px;
+            font-size: 24px;
+        }
+        
+        .form-group {
             margin-bottom: 20px;
         }
-        .form-control {
-            border: none;
-            background: #f5deb3;
-            color: black;
+        
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #2c3e50;
         }
-        .btn-custom {
-            background: black;
-            color: gold;
+        
+        input[type="email"],
+        input[type="text"] {
             width: 100%;
-            padding: 10px;
-            border-radius: 5px;
-            cursor: pointer;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+        
+        input[type="email"]:focus,
+        input[type="text"]:focus {
+            border-color: #4CAF50;
+            outline: none;
+        }
+        
+        .btn {
+            display: inline-block;
+            background-color: #4CAF50;
+            color: white;
+            padding: 12px 20px;
             border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            transition: background-color 0.3s, transform 0.1s;
+            text-decoration: none;
+            text-align: center;
         }
-        .btn-custom:hover {
-            background: darkgoldenrod;
-            color: black;
+        
+        .btn:hover {
+            background-color: #45a049;
+            transform: translateY(-2px);
         }
-        .back-to-login {
-            margin-top: 10px;
+        
+        .btn:active {
+            transform: translateY(0);
         }
-        .message {
-            margin-top: 10px;
+        
+        .btn-back {
+            background-color: #6c757d;
+            margin-right: 10px;
+        }
+        
+        .btn-back:hover {
+            background-color: #5a6268;
+        }
+        
+        .error {
+            color: #e74c3c;
+            margin-bottom: 15px;
+            padding: 10px;
+            background-color: #fde8e6;
+            border-radius: 4px;
+            border-left: 4px solid #e74c3c;
+        }
+        
+        .success {
+            color: #2ecc71;
+            margin-bottom: 15px;
+            padding: 10px;
+            background-color: #d4edda;
+            border-radius: 4px;
+            border-left: 4px solid #2ecc71;
+        }
+        
+        p {
+            margin-bottom: 15px;
+        }
+        
+        .button-group {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 20px;
+        }
+        
+        .logo {
+            text-align: center;
+            margin-bottom: 20px;
+            font-size: 28px;
             font-weight: bold;
+            color: #4CAF50;
         }
-        .success-message {
-            color: darkgreen;
-        }
-        .error-message {
-            color: darkred;
+        
+        @media (max-width: 480px) {
+            .container {
+                padding: 20px;
+                margin: 20px auto;
+            }
+            
+            .button-group {
+                flex-direction: column;
+                gap: 10px;
+            }
+            
+            .btn {
+                width: 100%;
+                margin-right: 0;
+            }
         }
     </style>
 </head>
 <body>
-    <div class="login-container">
-        <h2>CELESTIAL JEWELS</h2>
-        <h4>Reset Password</h4>
+    <div class="container">
+        <div class="logo">Celestial Jewels</div>
+        <h2>Forgot Password</h2>
         
-        <?php if (!empty($message)): ?>
-            <p class="message <?php echo strpos($message, "generated") !== false ? 'success-message' : 'error-message'; ?>">
-                <?php echo $message; ?>
-            </p>
+        <?php if(isset($error_message)): ?>
+            <div class="error"><?php echo $error_message; ?></div>
         <?php endif; ?>
         
-        <form method="post" action="<?php echo htmlspecialchars($_SERVER["PHP_SELF"]); ?>">
-            <div class="mb-3 text-start">
-                <label class="form-label">Email Address</label>
-                <input type="email" class="form-control" name="email" required>
-            </div>
-            <button type="submit" class="btn btn-custom">Reset Password</button>
-            <p class="back-to-login"><a href="login.php" class="text-dark">Back to Login</a></p>
-        </form>
+        <?php if(isset($success_message)): ?>
+            <div class="success"><?php echo $success_message; ?></div>
+            <p>Please enter the OTP sent to your email:</p>
+            <form action="change_password.php" method="post">
+                <div class="form-group">
+                    <label for="otp">Enter OTP:</label>
+                    <input type="text" name="otp" id="otp" required>
+                </div>
+                <div class="button-group">
+                    <a href="login.php" class="btn btn-back">Back to Login</a>
+                    <button type="submit" class="btn">Verify OTP</button>
+                </div>
+            </form>
+        <?php else: ?>
+            <p>Enter your email address to receive a password reset OTP.</p>
+            <form action="<?php echo htmlspecialchars($_SERVER["PHP_SELF"]); ?>" method="post">
+                <div class="form-group">
+                    <label for="email">Email Address:</label>
+                    <input type="email" name="email" id="email" required placeholder="your@email.com">
+                </div>
+                <div class="button-group">
+                    <a href="login.php" class="btn btn-back">Back to Login</a>
+                    <button type="submit" class="btn">Send OTP</button>
+                </div>
+            </form>
+        <?php endif; ?>
     </div>
 </body>
 </html>

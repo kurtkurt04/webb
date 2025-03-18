@@ -1,242 +1,170 @@
 <?php
+// Start session to retrieve OTP
 session_start();
-include 'db_connect.php';
 
-$message = "";
-$validToken = false;
-$token = "";
-$debug = false; // Set to true to see debugging info
+// Database connection
+$host = "localhost";
+$dbname = "celestial_jewels";
+$username = "root";
+$password = "";
 
-// Debug function
-function debug_token_reset($token, $conn) {
-    echo "<div style='background: #f5f5f5; border: 1px solid #ddd; padding: 10px; margin: 10px 0; color: #333;'>";
-    echo "<strong>DEBUG INFO (remove in production):</strong><br>";
-    echo "Token from URL: " . htmlspecialchars($token) . "<br>";
-    
-    // Check if token exists
-    $check = $conn->prepare("SELECT id, username, email, reset_expires FROM admin WHERE reset_token = ?");
-    $check->bind_param("s", $token);
-    $check->execute();
-    $result = $check->get_result();
-    
-    if ($row = $result->fetch_assoc()) {
-        echo "Found user: " . htmlspecialchars($row['username']) . "<br>";
-        echo "User ID: " . htmlspecialchars($row['id']) . "<br>";
-        echo "Email: " . htmlspecialchars($row['email']) . "<br>";
-        echo "Expiry: " . htmlspecialchars($row['reset_expires']) . "<br>";
-        echo "Current time: " . date('Y-m-d H:i:s') . "<br>";
-        
-        if (strtotime($row['reset_expires']) > time()) {
-            echo "Token is still valid (not expired)<br>";
-        } else {
-            echo "Token has expired<br>";
-        }
-    } else {
-        echo "No user found with this token.<br>";
-        
-        // Show first few users for debugging
-        $users = $conn->query("SELECT id, username, email, reset_token FROM admin LIMIT 5");
-        echo "<br>First few users in database:<br>";
-        while ($user = $users->fetch_assoc()) {
-            echo "ID: " . $user['id'] . ", Username: " . $user['username'] . 
-                 ", Email: " . $user['email'] . ", Token: " . $user['reset_token'] . "<br>";
-        }
-    }
-    
-    echo "</div>";
+try {
+    $conn = new PDO("mysql:host=$host;dbname=$dbname", $username, $password);
+    $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+} catch(PDOException $e) {
+    die("Connection failed: " . $e->getMessage());
 }
 
-if (isset($_GET['token'])) {
-    $token = trim($_GET['token']);
-    
-    if ($debug) {
-        debug_token_reset($token, $conn);
-    }
-    
-    // Verify token is valid and not expired
-    $stmt = $conn->prepare("SELECT id FROM admin WHERE reset_token = ? AND reset_expires > NOW()");
-    
-    if ($stmt) {
-        $stmt->bind_param("s", $token);
-        $stmt->execute();
-        $stmt->store_result();
+// Check if OTP is valid
+if ($_SERVER["REQUEST_METHOD"] == "POST") {
+    // OTP verification
+    if (isset($_POST['otp']) && !empty($_POST['otp'])) {
+        $entered_otp = $_POST['otp'];
         
-        if ($stmt->num_rows > 0) {
-            $validToken = true;
-        } else {
-            $message = "Invalid or expired reset link. Please request a new password reset.";
-        }
-        $stmt->close();
-    } else {
-        $message = "Database error: " . $conn->error;
-    }
-} else {
-    $message = "Missing token. Invalid reset link.";
-}
-
-// Process new password
-if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['password']) && isset($_POST['confirm_password'])) {
-    $token = isset($_GET['token']) ? trim($_GET['token']) : '';
-    $password = trim($_POST['password']);
-    $confirm_password = trim($_POST['confirm_password']);
-    
-    // Re-validate token
-    $check = $conn->prepare("SELECT id FROM admin WHERE reset_token = ? AND reset_expires > NOW()");
-    $check->bind_param("s", $token);
-    $check->execute();
-    $check->store_result();
-    $tokenValid = ($check->num_rows > 0);
-    $check->close();
-    
-    if (!$tokenValid) {
-        $message = "Invalid or expired reset link. Please request a new password reset.";
-    }
-    // Validate passwords match
-    elseif ($password !== $confirm_password) {
-        $message = "Passwords do not match";
-        $validToken = true; // Keep form visible
-    } 
-    // Validate password length
-    elseif (strlen($password) < 6) {
-        $message = "Password must be at least 6 characters long";
-        $validToken = true; // Keep form visible
-    } 
-    else {
-        // Update password in database
-        $stmt = $conn->prepare("UPDATE admin SET password = ?, reset_token = NULL, reset_expires = NULL WHERE reset_token = ?");
-        
-        if ($stmt) {
-            // Note: In a real application, you should hash the password
-            // For this example we're keeping the direct password storage to match your existing login system
-            $stmt->bind_param("ss", $password, $token);
-            $stmt->execute();
+        // Check if reset session exists
+        if (isset($_SESSION['reset_otp']) && isset($_SESSION['reset_email']) && isset($_SESSION['reset_time'])) {
+            $stored_otp = $_SESSION['reset_otp'];
+            $email = $_SESSION['reset_email'];
+            $time = $_SESSION['reset_time'];
             
-            if ($stmt->affected_rows > 0) {
-                $message = "Your password has been updated successfully";
-                $validToken = false; // Hide the form
-                header("refresh:3;url=index.php"); // Redirect after 3 seconds
+            // Check if OTP has expired (10 minutes)
+            if (time() - $time > 600) {
+                $error_message = "OTP has expired. Please request a new one.";
+            } else if ($entered_otp == $stored_otp) {
+                // OTP is correct, show password reset form
+                $otp_verified = true;
             } else {
-                $message = "Failed to update password. Please try again.";
-                $validToken = true; // Keep form visible
+                $error_message = "Invalid OTP. Please try again.";
             }
-            $stmt->close();
         } else {
-            $message = "Database error: " . $conn->error;
+            $error_message = "Session expired. Please request a new OTP.";
+        }
+    }
+    
+    // Password reset form submission
+    if (isset($_POST['new_password']) && isset($_POST['confirm_password'])) {
+        $new_password = $_POST['new_password'];
+        $confirm_password = $_POST['confirm_password'];
+        
+        if ($new_password != $confirm_password) {
+            $error_message = "Passwords do not match.";
+        } else if (strlen($new_password) < 8) {
+            $error_message = "Password must be at least 8 characters long.";
+        } else {
+            $email = $_SESSION['reset_email'];
+            $hashed_password = password_hash($new_password, PASSWORD_DEFAULT);
+            
+            // Update password in database
+            $stmt = $conn->prepare("UPDATE users SET password = :password WHERE email = :email");
+            $stmt->bindParam(':password', $hashed_password);
+            $stmt->bindParam(':email', $email);
+            
+            if ($stmt->execute()) {
+                // Clear session
+                unset($_SESSION['reset_otp']);
+                unset($_SESSION['reset_email']);
+                unset($_SESSION['reset_time']);
+                
+                $success_message = "Password has been reset successfully.";
+                $password_reset = true;
+            } else {
+                $error_message = "Failed to reset password. Please try again.";
+            }
         }
     }
 }
 ?>
 
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CELESTIAL JEWELS - Reset Password</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <title>Reset Password</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         body {
-            background: linear-gradient(to right, #111, #333);
-            color: gold;
-            height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            font-family: Arial, sans-serif;
+            max-width: 500px;
+            margin: 0 auto;
+            padding: 20px;
         }
-        .login-container {
-            width: 350px;
-            padding: 30px;
-            background: #c9a74a;
-            border-radius: 10px;
-            box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
-            text-align: center;
+        .container {
+            background-color: #f7f7f7;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
         }
-        .login-container h2 {
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
             font-weight: bold;
-            margin-bottom: 20px;
         }
-        .form-control {
-            border: none;
-            background: #f5deb3;
-            color: black;
-        }
-        .btn-custom {
-            background: black;
-            color: gold;
+        input[type="text"], input[type="password"] {
             width: 100%;
             padding: 10px;
-            border-radius: 5px;
-            cursor: pointer;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 15px;
             border: none;
+            border-radius: 4px;
+            cursor: pointer;
         }
-        .btn-custom:hover {
-            background: darkgoldenrod;
-            color: black;
+        button:hover {
+            background-color: #45a049;
         }
-        .back-to-login {
-            margin-top: 10px;
+        .error {
+            color: red;
+            margin-bottom: 15px;
         }
-        .message {
-            margin-top: 10px;
-            font-weight: bold;
-        }
-        .success-message {
-            color: darkgreen;
-        }
-        .error-message {
-            color: darkred;
+        .success {
+            color: green;
+            margin-bottom: 15px;
         }
     </style>
 </head>
 <body>
-    <div class="login-container">
-        <h2>CELESTIAL JEWELS</h2>
-        <h4>Create New Password</h4>
+    <div class="container">
+        <h2>Reset Password</h2>
         
-        <?php if (!empty($message)): ?>
-            <p class="message <?php echo strpos($message, "successfully") !== false ? 'success-message' : 'error-message'; ?>">
-                <?php echo $message; ?>
-            </p>
+        <?php if(isset($error_message)): ?>
+            <div class="error"><?php echo $error_message; ?></div>
         <?php endif; ?>
         
-        <?php if ($validToken): ?>
-            <form method="post" action="<?php echo htmlspecialchars($_SERVER["PHP_SELF"]) . "?token=" . htmlspecialchars($token); ?>">
-                <div class="mb-3 text-start">
-                    <label class="form-label">New Password</label>
-                    <input type="password" class="form-control" name="password" required>
+        <?php if(isset($success_message)): ?>
+            <div class="success"><?php echo $success_message; ?></div>
+            <?php if(isset($password_reset) && $password_reset): ?>
+                <p>You can now <a href="login.php">login</a> with your new password.</p>
+            <?php endif; ?>
+        <?php endif; ?>
+        
+        <?php if(!isset($otp_verified) && !isset($password_reset)): ?>
+            <form action="<?php echo htmlspecialchars($_SERVER["PHP_SELF"]); ?>" method="post">
+                <div class="form-group">
+                    <label for="otp">Enter OTP:</label>
+                    <input type="text" name="otp" id="otp" required>
                 </div>
-                <div class="mb-3 text-start">
-                    <label class="form-label">Confirm Password</label>
-                    <input type="password" class="form-control" name="confirm_password" required>
-                </div>
-                <button type="submit" class="btn btn-custom">Update Password</button>
+                <button type="submit">Verify OTP</button>
             </form>
-        <?php else: ?>
-            <p class="back-to-login"><a href="login.php" class="text-dark">Back to Login</a></p>
+        <?php elseif(isset($otp_verified) && $otp_verified && !isset($password_reset)): ?>
+            <form action="<?php echo htmlspecialchars($_SERVER["PHP_SELF"]); ?>" method="post">
+                <div class="form-group">
+                    <label for="new_password">New Password:</label>
+                    <input type="password" name="new_password" id="new_password" required>
+                </div>
+                <div class="form-group">
+                    <label for="confirm_password">Confirm Password:</label>
+                    <input type="password" name="confirm_password" id="confirm_password" required>
+                </div>
+                <button type="submit">Reset Password</button>
+            </form>
         <?php endif; ?>
     </div>
-    
-    <script>
-        // Client-side validation
-        document.addEventListener('DOMContentLoaded', function() {
-            const form = document.querySelector('form');
-            if (form) {
-                form.addEventListener('submit', function(e) {
-                    const password = document.querySelector('input[name="password"]').value;
-                    const confirmPassword = document.querySelector('input[name="confirm_password"]').value;
-                    
-                    if (password !== confirmPassword) {
-                        e.preventDefault();
-                        alert("Passwords do not match!");
-                    }
-                    
-                    if (password.length < 6) {
-                        e.preventDefault();
-                        alert("Password must be at least 6 characters long");
-                    }
-                });
-            }
-        });
-    </script>
 </body>
 </html>
