@@ -1,0 +1,86 @@
+body {
+    background: black;
+    color: gold;
+    overflow-x: hidden;
+}
+.dashboard-sidebar {
+    background: #c9a74a;
+    padding: 20px;
+    height: 100vh;
+    position: fixed;
+    width: 250px;
+}
+.dashboard-sidebar h4 {
+    font-weight: bold;
+    text-align: center;
+}
+.dashboard-sidebar .btn {
+    width: 100%;
+    margin-bottom: 10px;
+    background: black;
+    color: gold;
+}
+.dashboard-content {
+    margin-left: 270px;
+    padding: 30px;
+    height: 100vh;
+    overflow-y: auto;
+}
+.dashboard-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: relative;
+}
+.table-container {
+    background: white;
+    padding: 20px;
+    border-radius: 10px;
+}
+.table thead {
+    background: #c9a74a;
+    color: black;
+}
+.table tbody tr td {
+    color: black;
+}
+.status-dropdown {
+    background: none;
+    border: none;
+    cursor: pointer;
+}
+.status-dropdown:focus {
+    outline: none;
+}
+.profile-img {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+}
+.notification-icon {
+    font-size: 24px;
+    cursor: pointer;
+    position: relative;
+}
+.notification-badge {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    background: red;
+    color: white;
+    border-radius: 50%;
+    padding: 5px 10px;
+    font-size: 14px;
+}
+.notification-panel {
+    display: none;
+    position: absolute;
+    right: 0;
+    top: 40px;
+    background: white;
+    color: black;
+    padding: 15px;
+    border-radius: 5px;
+    width: 300px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+}
