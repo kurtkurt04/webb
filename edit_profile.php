@@ -1,7 +1,20 @@
 <?php
 session_start();
-include 'db_connect.php';
 
+// Connect to database
+$servername = "localhost";
+$username = "root"; // Change if needed
+$password = ""; // Change if needed
+$database = "celestial_jewels";
+
+$conn = new mysqli($servername, $username, $password, $database);
+
+// Check connection
+if ($conn->connect_error) {
+    die("Connection failed: " . $conn->connect_error);
+}
+
+// Check if user is logged in
 if (!isset($_SESSION['admin_logged_in'])) {
     header("Location: login.php");
     exit();
@@ -10,6 +23,7 @@ if (!isset($_SESSION['admin_logged_in'])) {
 $user_id = $_SESSION['user_id'];
 $error = "";
 $success = "";
+$action = isset($_GET['action']) ? $_GET['action'] : ""; // Get the action from the URL
 
 // Fetch current user data
 $stmt = $conn->prepare("SELECT name, username, email, password FROM admin WHERE id = ?");
@@ -20,79 +34,54 @@ $user = $result->fetch_assoc();
 $stmt->close();
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    $name = trim($_POST['name']);
-    $username = trim($_POST['username']);
-    $email = trim($_POST['email']);
-    $current_password = trim($_POST['current_password']);
-    $new_password = trim($_POST['new_password']);
-    
-    // Password change logic without debug info
-    $password_verified = true;
-    if (!empty($new_password)) {
-        if (empty($current_password)) {
-            $error = "Current password is required to set a new password";
-            $password_verified = false;
+    if ($action == "password") {
+        $current_password = trim($_POST['current_password']);
+        $new_password = trim($_POST['new_password']);
+        
+        if ($current_password === $user['password']) { // Simple password check for testing
+            $update_stmt = $conn->prepare("UPDATE admin SET password = ? WHERE id = ?");
+            $update_stmt->bind_param("si", $new_password, $user_id); // Plain text for testing
+            $update_stmt->execute();
+            $success = "Password updated successfully!";
+            $update_stmt->close();
         } else {
-            // Simple direct comparison without hashing
-            if ($current_password === $user['password']) {
-                // Password matches
-            } else {
-                $error = "Current password is incorrect";
-                $password_verified = false;
-            }
+            $error = "Current password is incorrect!";
         }
     }
 
-    // Continue if password verification passed
-    if ($password_verified) {
-        // Check for existing username/email
-        $check_stmt = $conn->prepare("SELECT id FROM admin WHERE (username = ? OR email = ?) AND id != ?");
-        $check_stmt->bind_param("ssi", $username, $email, $user_id);
+    if ($action == "email") {
+        $new_email = trim($_POST['new_email']);
+        
+        $check_stmt = $conn->prepare("SELECT id FROM admin WHERE email = ? AND id != ?");
+        $check_stmt->bind_param("si", $new_email, $user_id);
         $check_stmt->execute();
         
         if ($check_stmt->get_result()->num_rows > 0) {
-            $error = "Username or email already exists!";
+            $error = "Email already exists!";
         } else {
-            // Build update query
-            $query = "UPDATE admin SET name = ?, username = ?, email = ?";
-            $params = [$name, $username, $email];
-            $types = "sss";
-            
-            // Add password update if provided and verified
-            if (!empty($new_password)) {
-                $query .= ", password = ?";
-                $params[] = $new_password; // Store as plain text for testing
-                $types .= "s";
-            }
-            
-            $query .= " WHERE id = ?";
-            $params[] = $user_id;
-            $types .= "i";
-            
-            $update_stmt = $conn->prepare($query);
-            $update_stmt->bind_param($types, ...$params);
-            
-            if ($update_stmt->execute()) {
-                // Check if rows were affected
-                if ($update_stmt->affected_rows > 0) {
-                    $success = "Profile updated successfully!";
-                    
-                    // Update session variables
-                    $_SESSION['username'] = $username;
-                    
-                    // If password was changed
-                    if (!empty($new_password)) {
-                        $success .= " Password has been changed.";
-                    }
-                    
-                    // Refresh page to show updated data
-                    header("Refresh: 2");
-                } else {
-                    $success = "No changes detected or data is the same as before.";
-                }
-            } else {
-                $error = "Error updating profile: " . $update_stmt->error;
-            }
+            $update_stmt = $conn->prepare("UPDATE admin SET email = ? WHERE id = ?");
+            $update_stmt->bind_param("si", $new_email, $user_id);
+            $update_stmt->execute();
+            $success = "Email updated successfully!";
+            $update_stmt->close();
+        }
+        $check_stmt->close();
+    }
+
+    if ($action == "username") {
+        $new_username = trim($_POST['new_username']);
+        
+        $check_stmt = $conn->prepare("SELECT id FROM admin WHERE username = ? AND id != ?");
+        $check_stmt->bind_param("si", $new_username, $user_id);
+        $check_stmt->execute();
+        
+        if ($check_stmt->get_result()->num_rows > 0) {
+            $error = "Username already exists!";
+        } else {
+            $update_stmt = $conn->prepare("UPDATE admin SET username = ? WHERE id = ?");
+            $update_stmt->bind_param("si", $new_username, $user_id);
+            $update_stmt->execute();
+            $success = "Username updated successfully!";
             $update_stmt->close();
         }
         $check_stmt->close();
@@ -115,7 +104,14 @@ $conn->close();
 </head>
 <body>
     <div class="profile-container">
-        <h2 class="mb-4">Edit Profile</h2>
+        <h2 class="mb-4">
+            <?php
+            if ($action == "password") echo "Change Password";
+            elseif ($action == "email") echo "Change Email";
+            elseif ($action == "username") echo "Change Username";
+            else echo "Edit Profile";
+            ?>
+        </h2>
         
         <?php if ($error): ?>
             <div class="alert alert-danger"><?= htmlspecialchars($error) ?></div>
@@ -126,36 +122,29 @@ $conn->close();
         <?php endif; ?>
 
         <form method="post">
-            <div class="form-group">
-                <label>Full Name</label>
-                <input type="text" name="name" class="form-control" 
-                       value="<?= htmlspecialchars($user['name']) ?>" required>
-            </div>
-            
-            <div class="form-group">
-                <label>Username</label>
-                <input type="text" name="username" class="form-control"
-                       value="<?= htmlspecialchars($user['username']) ?>" required>
-            </div>
-            
-            <div class="form-group">
-                <label>Email</label>
-                <input type="email" name="email" class="form-control"
-                       value="<?= htmlspecialchars($user['email']) ?>" required>
-            </div>
-            
-            <div class="form-group">
-                <label>Current Password (required to change password)</label>
-                <input type="password" name="current_password" class="form-control">
-            </div>
-            
-            <div class="form-group">
-                <label>New Password (leave blank to keep current)</label>
-                <input type="password" name="new_password" class="form-control">
-            </div>
+            <?php if ($action == "password"): ?>
+                <div class="form-group">
+                    <label>Current Password</label>
+                    <input type="password" name="current_password" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label>New Password</label>
+                    <input type="password" name="new_password" class="form-control" required>
+                </div>
+            <?php elseif ($action == "email"): ?>
+                <div class="form-group">
+                    <label>New Email</label>
+                    <input type="email" name="new_email" class="form-control" required>
+                </div>
+            <?php elseif ($action == "username"): ?>
+                <div class="form-group">
+                    <label>New Username</label>
+                    <input type="text" name="new_username" class="form-control" required>
+                </div>
+            <?php endif; ?>
             
             <button type="submit" class="btn btn-primary">Save Changes</button>
-            <a href="dashboard.php" class="btn btn-secondary">Back to Dashboard</a>
+            <a href="profile.php" class="btn btn-secondary">Back</a>
         </form>
     </div>
 </body>

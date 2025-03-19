@@ -41,8 +41,19 @@
             border-radius: 5px;
             font-size: 18px;
             margin-top: 20px;
+            display: inline-block;
+            text-decoration: none;
+        }
+        .logout-btn:hover {
+            background: darkred;
+            color: white;
         }
     </style>
+    <script>
+        function redirectToEdit(action) {
+            window.location.href = 'edit_profile.php?action=' + action;
+        }
+    </script>
 </head>
 <body>
     <div class="dashboard-content">
@@ -51,9 +62,9 @@
         <h3>Leonard P. Pogi</h3>
         <p>Status: Manager</p>
         <div class="profile-box">
-            <button class="btn w-100">Change Password</button>
-            <button class="btn w-100 mt-2">Change Email</button>
-            <button class="btn w-100 mt-2">Change Username</button>
+            <button class="btn btn-dark w-100" onclick="redirectToEdit('password')">Change Password</button>
+            <button class="btn btn-dark w-100 mt-2" onclick="redirectToEdit('email')">Change Email</button>
+            <button class="btn btn-dark w-100 mt-2" onclick="redirectToEdit('username')">Change Username</button>
         </div>
         <a href="login.php" class="logout-btn">LOGOUT</a>
     </div>
