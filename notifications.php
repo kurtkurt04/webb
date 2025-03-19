@@ -3,7 +3,8 @@
 // This file should only handle the API request and return JSON
 
 // Only process if this file is being accessed directly as an API endpoint
-if(basename($_SERVER['PHP_SELF']) == 'notifications.php') {
+// or if it's a direct AJAX request
+if(basename($_SERVER['PHP_SELF']) == 'notifications.php' && empty($_SERVER['HTTP_X_REQUESTED_WITH']) && !isset($_GET['include'])) {
     // Database connection
     $servername = "localhost";
     $username = "root";
@@ -19,82 +20,95 @@ if(basename($_SERVER['PHP_SELF']) == 'notifications.php') {
     // Initialize notifications array
     $notifications = [];
 
-    // Check for new orders (last 24 hours)
-    $orderQuery = "SELECT order_id, customer_id, order_date, total_amount 
-                FROM orders 
-                WHERE order_date >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
-                ORDER BY order_date DESC";
+    try {
+        // Check for new orders (last 24 hours)
+        $orderQuery = "SELECT order_id, customer_id, order_date, total_amount 
+                    FROM orders 
+                    WHERE order_date >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
+                    ORDER BY order_date DESC";
 
-    $result = $conn->query($orderQuery);
+        $result = $conn->query($orderQuery);
 
-    while ($row = $result->fetch_assoc()) {
-        $notifications[] = [
-            'type' => 'order',
-            'message' => "New order #" . $row['order_id'] . " received for $" . $row['total_amount'],
-            'timestamp' => $row['order_date'],
-            'id' => $row['order_id']
-        ];
+        if ($result) {
+            while ($row = $result->fetch_assoc()) {
+                $notifications[] = [
+                    'type' => 'order',
+                    'message' => "New order #" . $row['order_id'] . " received for $" . $row['total_amount'],
+                    'timestamp' => $row['order_date'],
+                    'id' => $row['order_id']
+                ];
+            }
+        }
+
+        // Check for new products (latest 10 products)
+        $productQuery = "SELECT id, name, selling_price
+                        FROM products
+                        ORDER BY id DESC
+                        LIMIT 10";
+
+        $result = $conn->query($productQuery);
+
+        if ($result) {
+            while ($row = $result->fetch_assoc()) {
+                $notifications[] = [
+                    'type' => 'product',
+                    'message' => "Product available: " . $row['name'] . " ($" . $row['selling_price'] . ")",
+                    'timestamp' => date('Y-m-d H:i:s'), // Current time
+                    'id' => $row['id']
+                ];
+            }
+        }
+
+        // Check for new customers (latest 10 customers)
+        $customerQuery = "SELECT customer_id, username, email
+                        FROM customers_tbl
+                        ORDER BY customer_id DESC
+                        LIMIT 10";
+
+        $result = $conn->query($customerQuery);
+
+        if ($result) {
+            while ($row = $result->fetch_assoc()) {
+                $notifications[] = [
+                    'type' => 'customer',
+                    'message' => "Customer registered: " . $row['username'],
+                    'timestamp' => date('Y-m-d H:i:s'), // Current time
+                    'id' => $row['customer_id']
+                ];
+            }
+        }
+
+        // Check for low stock products (below 10 items)
+        $lowStockQuery = "SELECT id, name, stocks
+                        FROM products
+                        WHERE stocks < 10
+                        ORDER BY stocks ASC";
+
+        $result = $conn->query($lowStockQuery);
+
+        if ($result) {
+            while ($row = $result->fetch_assoc()) {
+                $notifications[] = [
+                    'type' => 'stock',
+                    'message' => "Low stock alert: " . $row['name'] . " (Only " . $row['stocks'] . " left)",
+                    'timestamp' => date('Y-m-d H:i:s'),
+                    'id' => $row['id']
+                ];
+            }
+        }
+
+        // Sort notifications by timestamp (newest first)
+        usort($notifications, function($a, $b) {
+            return strtotime($b['timestamp']) - strtotime($a['timestamp']);
+        });
+
+        // Return JSON response
+        header('Content-Type: application/json');
+        echo json_encode($notifications);
+    } catch (Exception $e) {
+        header('Content-Type: application/json');
+        echo json_encode(['error' => 'Database error: ' . $e->getMessage()]);
     }
-
-    // Check for new products (latest 10 products)
-    $productQuery = "SELECT id, name, selling_price
-                    FROM products
-                    ORDER BY id DESC
-                    LIMIT 10";
-
-    $result = $conn->query($productQuery);
-
-    while ($row = $result->fetch_assoc()) {
-        $notifications[] = [
-            'type' => 'product',
-            'message' => "Product available: " . $row['name'] . " ($" . $row['selling_price'] . ")",
-            'timestamp' => date('Y-m-d H:i:s'), // Current time
-            'id' => $row['id']
-        ];
-    }
-
-    // Check for new customers (latest 10 customers)
-    $customerQuery = "SELECT customer_id, username, email
-                    FROM customers_tbl
-                    ORDER BY customer_id DESC
-                    LIMIT 10";
-
-    $result = $conn->query($customerQuery);
-
-    while ($row = $result->fetch_assoc()) {
-        $notifications[] = [
-            'type' => 'customer',
-            'message' => "Customer registered: " . $row['username'],
-            'timestamp' => date('Y-m-d H:i:s'), // Current time
-            'id' => $row['customer_id']
-        ];
-    }
-
-    // Check for low stock products (below 10 items)
-    $lowStockQuery = "SELECT id, name, stocks
-                    FROM products
-                    WHERE stocks < 10
-                    ORDER BY stocks ASC";
-
-    $result = $conn->query($lowStockQuery);
-
-    while ($row = $result->fetch_assoc()) {
-        $notifications[] = [
-            'type' => 'stock',
-            'message' => "Low stock alert: " . $row['name'] . " (Only " . $row['stocks'] . " left)",
-            'timestamp' => date('Y-m-d H:i:s'),
-            'id' => $row['id']
-        ];
-    }
-
-    // Sort notifications by timestamp (newest first)
-    usort($notifications, function($a, $b) {
-        return strtotime($b['timestamp']) - strtotime($a['timestamp']);
-    });
-
-    // Return JSON response
-    header('Content-Type: application/json');
-    echo json_encode($notifications);
 
     $conn->close();
     exit; // Stop execution to prevent HTML output
@@ -329,12 +343,24 @@ if(basename($_SERVER['PHP_SELF']) == 'notifications.php') {
 
         // Fetch notifications from server
         function fetchNotifications() {
-            fetch('notifications.php')
-                .then(response => response.json())
+            // Use a timestamp parameter to prevent caching
+            fetch('get_notifications.php?t=' + new Date().getTime())
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+                    return response.json();
+                })
                 .then(data => {
                     // Clear existing notifications
                     document.getElementById('notificationList').innerHTML = '';
                     document.getElementById('notificationCount').textContent = '0';
+                    
+                    // Check if there's an error message
+                    if (data.error) {
+                        document.getElementById('notificationList').innerHTML = '<li>Error: ' + data.error + '</li>';
+                        return;
+                    }
                     
                     // Store fetched notifications
                     notifications = data;
@@ -351,7 +377,7 @@ if(basename($_SERVER['PHP_SELF']) == 'notifications.php') {
                 })
                 .catch(error => {
                     console.error('Error fetching notifications:', error);
-                    document.getElementById('notificationList').innerHTML = '<li>Error loading notifications</li>';
+                    document.getElementById('notificationList').innerHTML = '<li>Error loading notifications. Please try again.</li>';
                 });
         }
 
