@@ -7,6 +7,7 @@ require 'vendor/autoload.php'; // Make sure PHPMailer is installed via Composer
 
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
+use PHPMailer\PHPMailer\SMTP;
 
 // Function to generate OTP
 function generateOTP($length = 6) {
@@ -19,11 +20,12 @@ function sendOTPEmail($email, $otp) {
 
     try {
         // Server settings
+        $mail->SMTPDebug = SMTP::DEBUG_OFF; // Enable verbose debug output (SMTP::DEBUG_SERVER for detailed debugging)
         $mail->isSMTP();
         $mail->Host       = 'smtp.gmail.com';
         $mail->SMTPAuth   = true;
         $mail->Username   = 'killernasus04@gmail.com'; // Your Gmail
-        $mail->Password   = 'hssy yghe dgdz gfcs';    // Your Gmail app password
+        $mail->Password   = 'dndo fnlv lhhl fsor';    // Your Gmail app password
         $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
         $mail->Port       = 587;
 
@@ -40,6 +42,8 @@ function sendOTPEmail($email, $otp) {
         $mail->send();
         return true;
     } catch (Exception $e) {
+        // For debugging purposes, you can save the error message
+        $_SESSION['mail_error'] = "Mailer Error: " . $mail->ErrorInfo;
         return false;
     }
 }
@@ -47,15 +51,27 @@ function sendOTPEmail($email, $otp) {
 // Process email input
 if ($_SERVER["REQUEST_METHOD"] == "POST" && !empty($_POST['email'])) {
     $email = filter_var($_POST['email'], FILTER_SANITIZE_EMAIL);
-    $otp = generateOTP();
-    $_SESSION['otp'] = $otp;
-    $_SESSION['otp_time'] = time();
-    $_SESSION['email'] = $email;
-
-    if (sendOTPEmail($email, $otp)) {
-        $success_message = "OTP sent successfully to $email.";
+    
+    // Validate the email
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        $error_message = "Invalid email format. Please enter a valid email address.";
     } else {
-        $error_message = "Failed to send OTP. Please try again.";
+        $otp = generateOTP();
+        $_SESSION['otp'] = $otp;
+        $_SESSION['otp_time'] = time();
+        $_SESSION['email'] = $email;
+
+        if (sendOTPEmail($email, $otp)) {
+            $success_message = "OTP sent successfully to $email.";
+        } else {
+            $error_message = "Failed to send OTP. Please try again.";
+            // Add debug info if needed
+            if (isset($_SESSION['mail_error'])) {
+                // For development only - comment this out in production
+                // $error_message .= " Error: " . $_SESSION['mail_error'];
+                unset($_SESSION['mail_error']);
+            }
+        }
     }
 }
 ?>

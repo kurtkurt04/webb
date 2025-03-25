@@ -151,4 +151,35 @@ function deleteProduct($id) {
     $stmt->bind_param("i", $id);
     return $stmt->execute();
 }
+function getCategories() {
+    global $conn;
+    
+    // Use a prepared statement for safety
+    $stmt = $conn->prepare("SELECT id, name FROM categories ORDER BY name");
+    
+    if (!$stmt) {
+        // Log or handle the prepare error
+        error_log("Prepare failed: " . $conn->error);
+        return [];
+    }
+    
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    $categories = [];
+    while ($row = $result->fetch_assoc()) {
+        $categories[] = $row;
+    }
+    
+    return $categories;
+}
 ?>
+
+
+
+
+
+
+
+
+

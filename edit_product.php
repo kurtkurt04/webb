@@ -1,11 +1,13 @@
 <?php
 include 'functions.php'; // Include database connection
-
 // Handle product deletion
 if (isset($_POST['delete_product']) && isset($_POST['id'])) {
     $id = $_POST['id'];
     // First get the image path to delete the file
-    $image_result = mysqli_query($conn, "SELECT image_path FROM products WHERE id='$id'");
+    $stmt = mysqli_prepare($conn, "SELECT image_path FROM products WHERE id = ?");
+    mysqli_stmt_bind_param($stmt, "i", $id);
+    mysqli_stmt_execute($stmt);
+    $image_result = mysqli_stmt_get_result($stmt);
     $image_data = mysqli_fetch_assoc($image_result);
     
     // Delete the image file if it exists
@@ -13,8 +15,10 @@ if (isset($_POST['delete_product']) && isset($_POST['id'])) {
         unlink($image_data['image_path']);
     }
     
-    // Delete the product record
-    mysqli_query($conn, "DELETE FROM products WHERE id='$id'");
+    // Delete the product record using prepared statement
+    $delete_stmt = mysqli_prepare($conn, "DELETE FROM products WHERE id = ?");
+    mysqli_stmt_bind_param($delete_stmt, "i", $id);
+    mysqli_stmt_execute($delete_stmt);
     
     // Redirect to products page
     $_SESSION['success_message'] = "Product successfully deleted!";
@@ -22,12 +26,21 @@ if (isset($_POST['delete_product']) && isset($_POST['id'])) {
     exit;
 }
 
+// Fetch categories for dropdown
+$categories = [];
+$category_query = mysqli_query($conn, "SELECT * FROM categories_tbl ORDER BY categoryId");
+if ($category_query) {
+    while ($category = mysqli_fetch_assoc($category_query)) {
+        $categories[] = $category;
+    }
+}
+
 // Fetch product details if editing
 $product = null;
 if (isset($_GET['id'])) {
     $id = $_GET['id'];
     // Use prepared statement to prevent SQL injection
-    $stmt = mysqli_prepare($conn, "SELECT * FROM products WHERE id=?");
+    $stmt = mysqli_prepare($conn, "SELECT * FROM products WHERE id = ?");
     mysqli_stmt_bind_param($stmt, "i", $id);
     mysqli_stmt_execute($stmt);
     $result = mysqli_stmt_get_result($stmt);
@@ -48,12 +61,13 @@ if (isset($_GET['id'])) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_product'])) {
     $id = $_POST['id'];
     $name = $_POST['name'];
-    $category_id = $_POST['category_id'];
     $size = $_POST['size'];
     $selling_price = $_POST['selling_price'];
     $stocks = $_POST['stocks'];
+    $category_id = $_POST['category_id']; // New field for category
     
     // Handle image upload
+    $image_path = $product['image_path']; // Default to existing image path
     if (isset($_FILES['image']) && $_FILES['image']['error'] == 0) {
         $target_dir = "uploads/";
         // Create directory if it doesn't exist
@@ -72,20 +86,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_product'])) {
                 unlink($product['image_path']);
             }
             $image_path = $target_file;
-            
-            // Update with new image
-            $stmt = mysqli_prepare($conn, "UPDATE products SET name=?, category_id=?, size=?, selling_price=?, stocks=?, image_path=? WHERE id=?");
-            mysqli_stmt_bind_param($stmt, "ssssdsi", $name, $category_id, $size, $selling_price, $stocks, $image_path, $id);
         } else {
             $upload_error = "Failed to upload image.";
         }
-    } else {
-        // Update without changing image
-        $stmt = mysqli_prepare($conn, "UPDATE products SET name=?, category_id=?, size=?, selling_price=?, stocks=? WHERE id=?");
-        mysqli_stmt_bind_param($stmt, "ssssdi", $name, $category_id, $size, $selling_price, $stocks, $id);
     }
     
-    if (isset($stmt) && mysqli_stmt_execute($stmt)) {
+    // Prepare update statement with or without image
+    if (isset($_FILES['image']) && $_FILES['image']['error'] == 0) {
+        $stmt = mysqli_prepare($conn, "UPDATE products SET name = ?, size = ?, selling_price = ?, stocks = ?, category_id = ?, image_path = ? WHERE id = ?");
+        mysqli_stmt_bind_param($stmt, "ssdsisi", $name, $size, $selling_price, $stocks, $category_id, $image_path, $id);
+    } else {
+        $stmt = mysqli_prepare($conn, "UPDATE products SET name = ?, size = ?, selling_price = ?, stocks = ?, category_id = ? WHERE id = ?");
+        mysqli_stmt_bind_param($stmt, "ssdsii", $name, $size, $selling_price, $stocks, $category_id, $id);
+    }
+    
+    if (mysqli_stmt_execute($stmt)) {
         $_SESSION['success_message'] = "Product updated successfully!";
         header("Location: products.php");
         exit;
@@ -93,11 +108,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_product'])) {
         $db_error = "Database error: " . mysqli_error($conn);
     }
 }
-
-// Fetch categories for dropdown
-$categories_query = "SELECT id, name FROM categories_tbl ORDER BY name";
-$categories_result = mysqli_query($conn, $categories_query);
 ?>
+
+
+    
 
 <!DOCTYPE html>
 <html lang="en">
@@ -393,19 +407,16 @@ $categories_result = mysqli_query($conn, $categories_query);
             </div>
             
             <div class="form-group">
-                <label for="category_id">Category:</label>
-                <select id="category_id" name="category_id" required>
-                    <?php if ($categories_result && mysqli_num_rows($categories_result) > 0): ?>
-                        <?php while ($category = mysqli_fetch_assoc($categories_result)): ?>
-                            <option value="<?php echo $category['id']; ?>" <?php echo ($category['id'] == $product['category_id']) ? 'selected' : ''; ?>>
-                                <?php echo htmlspecialchars($category['name']); ?>
-                            </option>
-                        <?php endwhile; ?>
-                    <?php else: ?>
-                        <option value="<?php echo $product['category_id']; ?>">Current Category</option>
-                    <?php endif; ?>
-                </select>
-            </div>
+    <label for="category_id">Category:</label>
+    <select id="category_id" name="category_id" required>
+        <?php foreach ($categories as $category): ?>
+            <option value="<?php echo $category['categoryId']; ?>" 
+                <?php echo ($product['category_id'] == $category['categoryId']) ? 'selected' : ''; ?>>
+                <?php echo htmlspecialchars($category['Name']); ?>
+            </option>
+        <?php endforeach; ?>
+    </select>
+</div>
             
             <div class="form-group">
                 <label for="size">Size:</label>

@@ -2,66 +2,127 @@
 // Include database connection
 require_once 'functions.php';
 
-// Fetch orders
-$sql = "SELECT 
-    order_id, 
-    customer_id, 
-    order_date,
-    total_amount, 
-    status,
-    payment_method
-FROM orders
-ORDER BY order_date DESC";
+// Function to get the last 7 days with their dates
+function getLastSevenDays() {
+    $days = [];
+    for ($i = 6; $i >= 0; $i--) {
+        $days[] = [
+            'date' => date('Y-m-d', strtotime("-$i days")),
+            'day' => date('D', strtotime("-$i days"))
+        ];
+    }
+    return $days;
+}
 
-$result = mysqli_query($conn, $sql);
+// Get the last 7 days
+$days = getLastSevenDays();
 
-// Initialize sales data array
+// Initialize data arrays
 $salesData = [];
 $userData = [];
 
-// Set up default data
-$days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+// Prepare initial data structure
 foreach ($days as $day) {
-    $salesData[] = ['day' => $day, 'sales' => 0];
-    $userData[] = ['day' => $day, 'users' => 0];
-}
-
-// Process orders to get sales data
-if ($result && mysqli_num_rows($result) > 0) {
-    $dayMap = [
-        0 => 6, // Sunday -> index 6
-        1 => 0, // Monday -> index 0
-        2 => 1, // Tuesday -> index 1
-        3 => 2, // Wednesday -> index 2
-        4 => 3, // Thursday -> index 3
-        5 => 4, // Friday -> index 4
-        6 => 5, // Saturday -> index 5
+    $salesData[] = [
+        'date' => $day['date'],
+        'day' => $day['day'],
+        'total_sales' => 0,
+        'total_products' => 0,
+        'orders_count' => 0
     ];
     
-    // Clone the result for table display
-    $orders_result = $result;
-    
-    while ($row = mysqli_fetch_assoc($result)) {
-        $date = strtotime($row['order_date']);
-        $dayOfWeek = date('w', $date);
-        $index = $dayMap[$dayOfWeek];
-        
-        // Add sales amount to the corresponding day
-        $salesData[$index]['sales'] += $row['total_amount'];
-        
-        // Count unique customers (simple approach)
-        $userData[$index]['users'] += 1;
-    }
-    
-    // Reset the result pointer for the table
-    mysqli_data_seek($orders_result, 0);
-} else {
-    $orders_result = $result;
+    $userData[] = [
+        'date' => $day['date'],
+        'day' => $day['day'],
+        'new_users' => 0
+    ];
 }
 
-// Extract just the sales values for the JavaScript
-$salesValues = array_map(function($item) { return $item['sales']; }, $salesData);
-$userValues = array_map(function($item) { return $item['users']; }, $userData);
+// Fetch detailed sales data for the last 7 days
+$sales_sql = "
+    SELECT 
+        DATE(order_date) as order_date,
+        SUM(total_amount) as daily_sales,
+        SUM((SELECT COUNT(*) FROM order_items WHERE order_id = o.order_id)) as total_products,
+        COUNT(*) as orders_count
+    FROM 
+        orders o
+    WHERE 
+        order_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+    GROUP BY 
+        DATE(order_date)
+";
+
+$sales_result = mysqli_query($conn, $sales_sql);
+
+if ($sales_result) {
+    while ($row = mysqli_fetch_assoc($sales_result)) {
+        // Find the index for this date
+        $index = array_search($row['order_date'], array_column($salesData, 'date'));
+        
+        if ($index !== false) {
+            $salesData[$index]['total_sales'] = floatval($row['daily_sales']);
+            $salesData[$index]['total_products'] = intval($row['total_products']);
+            $salesData[$index]['orders_count'] = intval($row['orders_count']);
+        }
+    }
+}
+
+// Fetch new user registrations
+$users_sql = "
+    SELECT 
+        DATE(registration_date) as reg_date,
+        COUNT(*) as new_users
+    FROM 
+        customers_tbl
+    WHERE 
+        registration_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+    GROUP BY 
+        DATE(registration_date)
+";
+
+$users_result = mysqli_query($conn, $users_sql);
+
+if ($users_result) {
+    while ($row = mysqli_fetch_assoc($users_result)) {
+        // Find the index for this date
+        $index = array_search($row['reg_date'], array_column($userData, 'date'));
+        
+        if ($index !== false) {
+            $userData[$index]['new_users'] = intval($row['new_users']);
+        }
+    }
+}
+
+// Prepare data for charts
+$salesValues = array_column($salesData, 'total_sales');
+$productValues = array_column($salesData, 'total_products');
+$userValues = array_column($userData, 'new_users');
+$dayLabels = array_column($salesData, 'day');
+
+// Prepare recent orders query with more details
+$orders_sql = "
+    SELECT 
+        o.order_id, 
+        o.customer_id, 
+        o.order_date,
+        o.total_amount, 
+        o.status,
+        o.payment_method,
+        (SELECT COUNT(*) FROM order_items WHERE order_id = o.order_id) as total_products
+    FROM 
+        orders o
+    ORDER BY 
+        o.order_date DESC
+    LIMIT 10
+";
+
+$orders_result = mysqli_query($conn, $orders_sql);
+
+// Debug information
+$total_sales = array_sum($salesValues);
+$total_products = array_sum($productValues);
+$total_new_users = array_sum($userValues);
 ?>
 
 <!DOCTYPE html>
@@ -71,120 +132,8 @@ $userValues = array_map(function($item) { return $item['users']; }, $userData);
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Celestial Jewelry - Dashboard</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="dashboard.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <style>
-        body {
-            background: black;
-            color: gold;
-            display: flex;
-            margin: 0;
-            padding: 0;
-            height: 100vh;
-        }
-        
-        .sidebar {
-            flex: 0 0 250px;
-            height: 100vh;
-            position: fixed;
-            left: 0;
-            top: 0;
-            z-index: 100;
-        }
-        
-        .main-content {
-            flex: 1;
-            margin-left: 250px; /* Match sidebar width */
-            padding: 20px;
-            width: calc(100% - 250px);
-            overflow-y: auto; /* Add scrolling for content */
-            max-height: 100vh;
-        }
-        
-        .top-bar {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-            width: 100%;
-            padding: 10px 0;
-        }
-        
-        .page-title {
-            margin: 0;
-            color: gold;
-        }
-        
-        .chart-container {
-            background: white;
-            padding: 20px;
-            border-radius: 10px;
-            margin-bottom: 20px;
-            border: 3px solid gold; /* Adding gold border to match theme */
-            box-shadow: 0 0 15px rgba(255, 215, 0, 0.5); /* Adding a gold glow effect */
-        }
-        
-        .chart-title {
-            color: #333;
-            font-weight: bold;
-            border-bottom: 2px solid gold;
-            padding-bottom: 8px;
-            margin-bottom: 15px;
-        }
-        
-        .table-container {
-            background: white;
-            padding: 20px;
-            border-radius: 10px;
-            margin-top: 20px;
-            border: 3px solid gold;
-            box-shadow: 0 0 15px rgba(255, 215, 0, 0.5);
-            overflow-x: auto;
-        }
-        
-        .table {
-            color: #333;
-        }
-        
-        .table thead th {
-            background-color: gold;
-            color: black;
-            border-color: #e0e0e0;
-        }
-        
-        .status-badge {
-            display: inline-block;
-            padding: 5px 10px;
-            border-radius: 20px;
-            font-weight: bold;
-            text-align: center;
-            min-width: 100px;
-        }
-        
-        .status-pending {
-            background-color: #ffc107;
-            color: black;
-        }
-        
-        .status-processing {
-            background-color: #17a2b8;
-            color: white;
-        }
-        
-        .status-shipped {
-            background-color: #007bff;
-            color: white;
-        }
-        
-        .status-delivered {
-            background-color: #28a745;
-            color: white;
-        }
-        
-        .status-cancelled {
-            background-color: #dc3545;
-            color: white;
-        }
-    </style>
 </head>
 <body>
     <div class="sidebar">
@@ -197,28 +146,28 @@ $userValues = array_map(function($item) { return $item['users']; }, $userData);
             <?php include 'topbar.php'; ?>
         </div>
 
-        <div class="btn-group mb-3">
-            <button class="btn btn-dark active" onclick="updateChart('day', event)">DAY</button>
-            <button class="btn btn-warning" onclick="updateChart('week', event)">WEEK</button>
-            <button class="btn btn-warning" onclick="updateChart('month', event)">MONTH</button>
-        </div>
-
         <div class="row">
             <div class="col-md-6">
                 <div class="chart-container">
                     <h5 class="chart-title">SALES</h5>
                     <canvas id="salesChart"></canvas>
                 </div>
+                <div class="chart-details">
+                    <p>Total Sales (Last 7 Days): $<?php echo number_format($total_sales, 2); ?></p>
+                    <p>Total Products Sold: <?php echo $total_products; ?></p>
+                </div>
             </div>
             <div class="col-md-6">
                 <div class="chart-container">
-                    <h5 class="chart-title">USERS</h5>
+                    <h5 class="chart-title">NEW USERS</h5>
                     <canvas id="usersChart"></canvas>
+                </div>
+                <div class="chart-details">
+                    <p>Total New Users (Last 7 Days): <?php echo $total_new_users; ?></p>
                 </div>
             </div>
         </div>
         
-        <!-- Updated Orders Table -->
         <div class="table-container">
             <h5 class="chart-title">RECENT ORDERS</h5>
             <table class="table table-bordered text-center">
@@ -228,6 +177,7 @@ $userValues = array_map(function($item) { return $item['users']; }, $userData);
                         <th>Customer ID</th>
                         <th>Order Date</th>
                         <th>Total Amount</th>
+                        <th>Total Products</th>
                         <th>Payment Method</th>
                         <th>Status</th>
                     </tr>
@@ -258,12 +208,13 @@ $userValues = array_map(function($item) { return $item['users']; }, $userData);
                                 <td><b>{$row['customer_id']}</b></td>
                                 <td>" . date('M d, Y', strtotime($row['order_date'])) . "</td>
                                 <td>\${$row['total_amount']}</td>
+                                <td>{$row['total_products']}</td>
                                 <td>" . ($row['payment_method'] ? $row['payment_method'] : 'N/A') . "</td>
                                 <td><span class='status-badge {$statusClass}'>{$row['status']}</span></td>
                             </tr>";
                         }
                     } else {
-                        echo "<tr><td colspan='6'>No orders found</td></tr>";
+                        echo "<tr><td colspan='7'>No orders found</td></tr>";
                     }
                     ?>
                 </tbody>
@@ -272,88 +223,62 @@ $userValues = array_map(function($item) { return $item['users']; }, $userData);
     </div>
 
     <script>
-        let salesChart, usersChart;
-        
-        // Sample data for week and month views
-        const weekSalesData = [
-            <?php echo json_encode($salesValues); ?>,
-            [Math.floor(Math.random() * 1000), Math.floor(Math.random() * 1000), Math.floor(Math.random() * 1000), 
-             Math.floor(Math.random() * 1000), Math.floor(Math.random() * 1000), Math.floor(Math.random() * 1000),
-             Math.floor(Math.random() * 1000)],
-            [Math.floor(Math.random() * 1000), Math.floor(Math.random() * 1000), Math.floor(Math.random() * 1000), 
-             Math.floor(Math.random() * 1000), Math.floor(Math.random() * 1000), Math.floor(Math.random() * 1000),
-             Math.floor(Math.random() * 1000)]
-        ];
-        
-        const weekUsersData = [
-            <?php echo json_encode($userValues); ?>,
-            [Math.floor(Math.random() * 100), Math.floor(Math.random() * 100), Math.floor(Math.random() * 100), 
-             Math.floor(Math.random() * 100), Math.floor(Math.random() * 100), Math.floor(Math.random() * 100),
-             Math.floor(Math.random() * 100)],
-            [Math.floor(Math.random() * 100), Math.floor(Math.random() * 100), Math.floor(Math.random() * 100), 
-             Math.floor(Math.random() * 100), Math.floor(Math.random() * 100), Math.floor(Math.random() * 100),
-             Math.floor(Math.random() * 100)]
-        ];
-
-        function createChart(ctx, label, data) {
-            return new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
-                    datasets: [{
-                        label: label,
-                        data: data,
-                        backgroundColor: 'blue',
-                        borderWidth: 1
-                    }]
+    // Chart.js configuration for Sales
+    var ctx = document.getElementById('salesChart').getContext('2d');
+    var salesChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: <?php echo json_encode($dayLabels); ?>,
+            datasets: [
+                {
+                    label: 'Total Sales ($)',
+                    data: <?php echo json_encode($salesValues); ?>,
+                    backgroundColor: 'rgba(75, 192, 192, 0.6)',
+                    borderColor: 'rgba(75, 192, 192, 1)',
+                    borderWidth: 1
+                },
+                {
+                    label: 'Products Sold',
+                    data: <?php echo json_encode($productValues); ?>,
+                    backgroundColor: 'rgba(255, 99, 132, 0.6)',
+                    borderColor: 'rgba(255, 99, 132, 1)',
+                    borderWidth: 1
                 }
-            });
-        }
-
-        function updateChart(period, event) {
-            let index = 0;
-            
-            switch(period) {
-                case 'day':
-                    index = 0;
-                    break;
-                case 'week':
-                    index = 1;
-                    break;
-                case 'month':
-                    index = 2;
-                    break;
+            ]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                y: {
+                    beginAtZero: true
+                }
             }
-            
-            salesChart.data.datasets[0].data = weekSalesData[index];
-            usersChart.data.datasets[0].data = weekUsersData[index];
-            salesChart.update();
-            usersChart.update();
-
-            // Update active button state
-            const buttons = document.querySelectorAll('.btn-group .btn');
-            buttons.forEach(btn => btn.classList.remove('active', 'btn-dark'));
-            buttons.forEach(btn => btn.classList.add('btn-warning'));
-            event.target.classList.remove('btn-warning');
-            event.target.classList.add('active', 'btn-dark');
         }
+    });
 
-        window.onload = function() {
-            const salesCtx = document.getElementById('salesChart').getContext('2d');
-            const usersCtx = document.getElementById('usersChart').getContext('2d');
-
-            salesChart = createChart(salesCtx, 'Sales', <?php echo json_encode($salesValues); ?>);
-            usersChart = createChart(usersCtx, 'Users', <?php echo json_encode($userValues); ?>);
-
-            // Fetch latest notifications
-            fetch("data.php?type=notifications")
-                .then(response => response.json())
-                .then(data => {
-                    // The notification handling is now in topbar.php
-                })
-                .catch(error => console.error("Error fetching notifications:", error));
-        };
+    // Chart.js configuration for Users
+    var userCtx = document.getElementById('usersChart').getContext('2d');
+    var usersChart = new Chart(userCtx, {
+        type: 'bar',
+        data: {
+            labels: <?php echo json_encode($dayLabels); ?>,
+            datasets: [{
+                label: 'New Users',
+                data: <?php echo json_encode($userValues); ?>,
+                backgroundColor: 'rgba(54, 162, 235, 0.6)',
+                borderColor: 'rgba(54, 162, 235, 1)',
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                y: {
+                    beginAtZero: true
+                }
+            }
+        }
+    });
     </script>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

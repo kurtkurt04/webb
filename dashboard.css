@@ -1,0 +1,150 @@
+:root {
+    --primary-gold: #FFD700;
+    --dark-background: #121212;
+    --card-background: #1E1E1E;
+    --text-primary: #E0E0E0;
+    --accent-color: #FFD700;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: 'Arial', sans-serif;
+    background-color: var(--dark-background);
+    color: var(--text-primary);
+    display: flex;
+    height: 100vh;
+    overflow-x: hidden;
+}
+
+.sidebar {
+    width: 260px;
+    background-color: #0A0A0A;
+    border-right: 2px solid var(--accent-color);
+    height: 100vh;
+    position: fixed;
+    left: 0;
+    top: 0;
+    z-index: 1000;
+    padding: 20px;
+}
+
+.main-content {
+    margin-left: 260px;
+    width: calc(100% - 260px);
+    padding: 30px;
+    overflow-y: auto;
+}
+
+.top-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 30px;
+    padding-bottom: 15px;
+    border-bottom: 2px solid var(--accent-color);
+}
+
+.page-title {
+    color: var(--primary-gold);
+    font-size: 2rem;
+    font-weight: bold;
+}
+
+.chart-container, .table-container {
+    background-color: var(--card-background);
+    border: 2px solid var(--accent-color);
+    border-radius: 12px;
+    padding: 25px;
+    margin-bottom: 25px;
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
+}
+
+.chart-title {
+    color: var(--primary-gold);
+    font-size: 1.25rem;
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid rgba(255, 215, 0, 0.3);
+}
+
+.chart-details {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 15px;
+    color: var(--text-primary);
+}
+
+.table {
+    width: 100%;
+    background-color: var(--card-background);
+}
+
+.table thead {
+    background-color: rgba(255, 215, 0, 0.1);
+}
+
+.table thead th {
+    color: var(--primary-gold);
+    border-bottom: 2px solid var(--accent-color);
+    padding: 12px;
+}
+
+.table tbody tr {
+    transition: background-color 0.3s ease;
+}
+
+.table tbody tr:hover {
+    background-color: rgba(255, 215, 0, 0.05);
+}
+
+.status-badge {
+    display: inline-block;
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.status-pending { 
+    background-color: #FFC107; 
+    color: #000; 
+}
+.status-processing { 
+    background-color: #17A2B8; 
+    color: #FFF; 
+}
+.status-shipped { 
+    background-color: #007BFF; 
+    color: #FFF; 
+}
+.status-delivered { 
+    background-color: #28A745; 
+    color: #FFF; 
+}
+.status-cancelled { 
+    background-color: #DC3545; 
+    color: #FFF; 
+}
+
+@media (max-width: 768px) {
+    .sidebar {
+        width: 0;
+        display: none;
+    }
+
+    .main-content {
+        margin-left: 0;
+        width: 100%;
+        padding: 15px;
+    }
+
+    .chart-container, .table-container {
+        padding: 15px;
+    }
+}

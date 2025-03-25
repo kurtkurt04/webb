@@ -1,6 +1,5 @@
 <?php
 include 'functions.php'; // Include database connection
-
 // Fetch products from the database with category names
 $query = "SELECT p.*, c.Name as category_name 
           FROM products p
